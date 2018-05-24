@@ -1,28 +1,8 @@
-# README
+
+# README ------------------------------------------------------------------
 
 # Script for processing and uploading Des Fert annuals biomass data to the
-# database. Based on an Excel sheet supplied by the technicians. The coding here
-# is specific to 2017 and should be generally applicable across years, but with
-# likely some modification required owing to these data being collected in a
-# spreadsheet.
-
-# libraries ----
-library(RPostgreSQL)
-library(tidyverse)
-library(readxl)
-
-# database connections ----
-pg <- dbConnect(dbDriver("PostgreSQL"),
-                user="srearl",
-                dbname="srearl",
-                host="localhost",
-                password=.rs.askForPassword("Enter password:"))
-
-pg <- dbConnect(dbDriver("PostgreSQL"),
-                user="srearl",
-                dbname="caplter",
-                host="postgresql.research.gios.asu.edu",
-                password=.rs.askForPassword("Enter password:"))
+# database. Based on an Excel sheet supplied by the technicians.
 
 # the initial build of the annuals_biomass table did not have a foreign key to
 # plot id. Added here but this is a one-time op.
@@ -32,29 +12,49 @@ pg <- dbConnect(dbDriver("PostgreSQL"),
 #                 FOREIGN KEY (plot_id)
 #                 REFERENCES urbancndep.plots(id);')
 
-# DesFert_Biomass_spr2017.xlsx is the name of the original file supplied by
-# Quincy, but the ultimate storage name and path is: 
-# /Research/UrbanCNdep/cndepAnnuals&CommunityComp/Biomass/SamplingSheets_withData/CNDep_SpringAnnualBiomassSampling_2017_wdata.xlsx
+
+# libraries ---------------------------------------------------------------
+
+library(RPostgreSQL)
+library(tidyverse)
+library(readxl)
+
+
+# connections -------------------------------------------------------------
+
+# postgres
+source('~/Documents/localSettings/pg_prod.R')
+source('~/Documents/localSettings/pg_local.R')
+  
+pg <- pg_prod
+pg <- pg_local
+
+
+# process data ------------------------------------------------------------
 
 # get the data and format as appropriate and to match database table structure ----
-biomass2017 <- read_excel('~/Desktop/DesFert_Biomass_spr2017.xlsx')
+biomass2018 <- read_excel('~/Desktop/CNDep_SpringAnnualBiomassSampling_2018_wdata.xlsx')
 
-biomass_temp <- biomass2017 %>%
-  rename(mass = `Aboveground Dry Mass (g) - Bag Mass (g)`) %>%  # that field name is painful
-  mutate(mass = replace(mass, grepl("no sample", NOTES), NA)) %>% # uncollected samples
-  mutate(mass = round(mass, digits = 3)) %>% # whoa, lots of sig figs
-  mutate(year = as.numeric(format(collection_date, format = "%Y"))) %>% # might as well get the year while we are at it
-  mutate(NOTES = paste0(ifelse(is.na(NOTES), "", paste0(NOTES, "; ")), "average bag wt (n=10) = 6.733")) %>% 
-  select(plot_id,
-         location_within_plot,
-         replicate,
-         subquad_orientation,
-         date = collection_date,
+biomass_temp <- biomass2018 %>%
+  rename(mass = `Aboveground Dry Mass (g) - envelope (g)`) %>%  # that field name is painful
+  # mutate(mass = replace(mass, grepl("no sample", NOTES), NA)) %>% # uncollected samples
+  # mutate(mass = round(mass, digits = 3)) %>% # whoa, lots of sig figs
+  mutate(
+    date = as.Date(`Collection Date`),
+    year = as.numeric(format(date, format = "%Y")),
+    NOTES = paste0(ifelse(is.na(NOTES), "", paste0(NOTES, "; ")), "average bag wt (n=10) = 1.437")
+  ) %>%
+  select(plot_id = `Trmt Plots`,
+         location_within_plot = `Sub-plots`,
+         replicate = replicates,
+         subquad_orientation = `Subquadrat Orientation (N, S, E, W)`,
+         date,
          year,
          mass,
          notes = NOTES)
 
-# database operations ----
+
+# data to postgres --------------------------------------------------------
 
 # write the data to a temp table
 if (dbExistsTable(pg, c('urbancndep', 'biomass_temp'))) dbRemoveTable(pg, c('urbancndep', 'biomass_temp')) # make sure tbl does not exist
