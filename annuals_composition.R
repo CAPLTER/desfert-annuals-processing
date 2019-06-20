@@ -22,28 +22,51 @@ pg <- pg_prod
 pg <- pg_local
 
 
+# fn() write_temp_table ---------------------------------------------------
+
+write_temp_table <- function(databaseName, tempTableName) {
+  
+  if (dbExistsTable(pg, c(databaseName, tempTableName))) {
+    
+    dbRemoveTable(pg, c(databaseName, tempTableName))
+    
+  }
+  
+  dbWriteTable(pg,
+               c(databaseName, tempTableName),
+               value = get(tempTableName),
+               row.names = F)
+  
+}
+
+
 # new data ----------------------------------------------------------------
 
 # import data
-annuals_cover <- read_excel('~/Desktop/FinalAnnualsData_2018.xlsx') 
-annuals_cover <- read_excel('~/Desktop/FinalAnnualsData_2017.xlsx') 
+annuals_cover <- read_excel('~/Desktop/FinalAnnualsData_2019.xlsx') 
+# annuals_cover <- read_excel('~/Desktop/FinalAnnualsData_2018.xlsx') 
+# annuals_cover <- read_excel('~/Desktop/FinalAnnualsData_2017.xlsx') 
 
 # clean up names
-colnames(annuals_cover) <- gsub("%", "", colnames(annuals_cover))
-colnames(annuals_cover) <- gsub("/", "_", colnames(annuals_cover))
 colnames(annuals_cover) <- str_trim(colnames(annuals_cover), "both")
-colnames(annuals_cover) <- gsub(" - ", "_", colnames(annuals_cover), fixed = T)
-colnames(annuals_cover) <- gsub("-", "_", colnames(annuals_cover))
 colnames(annuals_cover) <- gsub("\\r\\n", " ", colnames(annuals_cover))
 
-# add note regarding when personnel data are not included
-annuals_cover <- annuals_cover %>% 
-  mutate(Collector = replace(Collector, is.na(Collector), 'not reported'))
+# colnames(annuals_cover) <- gsub("%", "", colnames(annuals_cover))
+# colnames(annuals_cover) <- gsub("/", "_", colnames(annuals_cover))
+# colnames(annuals_cover) <- gsub(" - ", "_", colnames(annuals_cover), fixed = T)
+# colnames(annuals_cover) <- gsub("-", "_", colnames(annuals_cover))
+
+
+# add note regarding when personnel data are not included (likely not to be an
+# issue now that Sally is managing)
+
+# annuals_cover <- annuals_cover %>% 
+#   mutate(Collector = replace(Collector, is.na(Collector), 'not reported'))
 
 # add new cover events ----------------------------------------------------
 
 # pare down to relevant cols for events
-cover_event <- annuals_cover %>%
+temp_cover_event <- annuals_cover %>%
   mutate(sample_date = as.Date(`Date surveyed`)) %>%
   select(sample_date,
          year = Year,
@@ -53,20 +76,25 @@ cover_event <- annuals_cover %>%
          collector = Collector)
 
 # check for uniquness - should not be any duplicates
-cover_event %>%
+temp_cover_event %>%
   count(year, plot, patch_type, subplot) %>%
   ungroup() %>%
   arrange(desc(n)) %>%
   filter(n > 1)
 
 # cover_events to pg
-if (dbExistsTable(pg, c('urbancndep', 'temp_cover_events_old'))) dbRemoveTable(pg, c('urbancndep', 'temp_cover_events_old'))
-dbWriteTable(pg, c('urbancndep', 'temp_cover_events_old'), value = cover_event, row.names = F)
+write_temp_table(databaseName = 'urbancndep',
+                 tempTableName = 'temp_cover_event')
 
-# IF sample_date is not of type date
-dbExecute(pg,'
-          ALTER TABLE urbancndep.temp_cover_events_old
-          ALTER COLUMN sample_date TYPE DATE;')
+# if (dbExistsTable(pg, c('urbancndep', 'temp_cover_events_old'))) dbRemoveTable(pg, c('urbancndep', 'temp_cover_events_old'))
+# dbWriteTable(pg, c('urbancndep', 'temp_cover_events_old'), value = cover_event, row.names = F)
+
+
+# IF sample_date is not of type date - may not be necessary, check first
+# not needed in 2019 at least
+# dbExecute(pg,'
+# ALTER TABLE urbancndep.temp_cover_event
+#   ALTER COLUMN sample_date TYPE DATE;')
 
 insert_events_query <-
 'INSERT INTO urbancndep.cover_events
@@ -87,13 +115,14 @@ insert_events_query <-
     subplot,
     collector
   FROM
-  urbancndep.temp_cover_events_old
+  urbancndep.temp_cover_event
 );'
 
-dbExecute(pg, insert_events_query)
+dbExecute(pg,
+          insert_events_query)
 
 # remove temp table
-if (dbExistsTable(pg, c('urbancndep', 'temp_cover_events_old'))) dbRemoveTable(pg, c('urbancndep', 'temp_cover_events_old'))
+if (dbExistsTable(pg, c('urbancndep', 'temp_cover_event'))) dbRemoveTable(pg, c('urbancndep', 'temp_cover_event'))
 
 
 # cover data --------------------------------------------------------------
@@ -106,9 +135,15 @@ if (dbExistsTable(pg, c('urbancndep', 'temp_cover_events_old'))) dbRemoveTable(p
   # str(annuals_cover, list.len = ncol(annuals_cover))
   # annuals_cover[!is.na(annuals_cover$`Chorizanthe rigida`),]$`Chorizanthe rigida`
 
+str(annuals_cover, list.len = ncol(annuals_cover))
+
 # beginning after Date (to apply to all columns where something is measured),
 # convert cols (there are some of type char) to num
-annuals_cover[,c(14:ncol(annuals_cover))] <- apply(annuals_cover[,c(14:ncol(annuals_cover))], 2, function(x) as.numeric(as.character(x)))
+# annuals_cover[,c(14:ncol(annuals_cover))] <- apply(annuals_cover[,c(14:ncol(annuals_cover))], 2, function(x) as.numeric(as.character(x)))
+
+# annuals_cover <- annuals_cover %>% 
+#   mutate_at(.vars = 14:ncol(annuals_cover),
+#             .funs = as.numeric)
 
 # get event data that was previously added
 event_id <- dbGetQuery(pg,'
@@ -127,9 +162,9 @@ annuals_cover <- annuals_cover %>%
 
 # align column names with pg::cover_types ---------------------------------
 
-# 1. get all columns employed in the 2018 data
-names2018 <- annuals_cover %>% 
-  select(`Amsinckia menziesii`:`Simmondsia chinensis (Jojoba) Cover`) %>% 
+# 1. get all columns employed in that year's data
+dataNames <- annuals_cover %>% 
+  select(`Amsinckia menziesii`:ncol(annuals_cover)) %>% 
   gather(cover_type, cover_amt) %>% 
   filter(cover_amt != 0) %>% 
   filter(!is.na(cover_amt)) %>% 
@@ -137,7 +172,7 @@ names2018 <- annuals_cover %>%
   mutate(
     cover_type = tolower(cover_type),
     cover_type = gsub(" ", "_", cover_type),
-    names2018 = TRUE
+    dataNames = TRUE
   )
 
 # 2. get the cover types that are already in the database
@@ -154,22 +189,23 @@ FROM urbancndep.cover_types;') %>%
 
 # 3. join & anti-join to identify mismatches between 2018 names and those in the DB
 
-full_join(names2018, cover_types, by = c('cover_type' = 'cover_type')) %>% 
+full_join(dataNames, cover_types, by = c('cover_type' = 'cover_type')) %>% 
   arrange(inDB, cover_type)
 
-anti_join(names2018, cover_types, by = c('cover_type' = 'cover_type'))
+anti_join(dataNames, cover_types, by = c('cover_type' = 'cover_type'))
 
 cover_types %>% filter(grepl("litter", cover_type, ignore.case = T)) # helper line
 
 
 # 4. add new taxa to DB
-dbExecute(pg, "INSERT INTO urbancndep.cover_types(cover_category, cover_type, year_added) VALUES ('annual', 'Amsinckia', 2018);")
-dbExecute(pg, "INSERT INTO urbancndep.cover_types(cover_category, cover_type, year_added) VALUES ('annual', 'Eucrypta', 2018);")
-dbExecute(pg, "INSERT INTO urbancndep.cover_types(cover_category, cover_type, year_added) VALUES ('annual', 'unidentified_1_2018', 2018);")
-dbExecute(pg, "INSERT INTO urbancndep.cover_types(cover_category, cover_type, year_added) VALUES ('annual', 'unidentified_2_2018', 2018);")
-dbExecute(pg, "INSERT INTO urbancndep.cover_types(cover_category, cover_type, year_added) VALUES ('annual', 'unidentified_3_2018', 2018);")
-dbExecute(pg, "INSERT INTO urbancndep.cover_types(cover_category, cover_type, year_added) VALUES ('plot characteristic', 'litter', 2018);")
-dbExecute(pg, "INSERT INTO urbancndep.cover_types(cover_category, cover_type, year_added) VALUES ('plot characteristic', 'green', 2017);")
+# addressed in database change log for 2019
+# dbExecute(pg, "INSERT INTO urbancndep.cover_types(cover_category, cover_type, year_added) VALUES ('annual', 'Amsinckia', 2018);")
+# dbExecute(pg, "INSERT INTO urbancndep.cover_types(cover_category, cover_type, year_added) VALUES ('annual', 'Eucrypta', 2018);")
+# dbExecute(pg, "INSERT INTO urbancndep.cover_types(cover_category, cover_type, year_added) VALUES ('annual', 'unidentified_1_2018', 2018);")
+# dbExecute(pg, "INSERT INTO urbancndep.cover_types(cover_category, cover_type, year_added) VALUES ('annual', 'unidentified_2_2018', 2018);")
+# dbExecute(pg, "INSERT INTO urbancndep.cover_types(cover_category, cover_type, year_added) VALUES ('annual', 'unidentified_3_2018', 2018);")
+# dbExecute(pg, "INSERT INTO urbancndep.cover_types(cover_category, cover_type, year_added) VALUES ('plot characteristic', 'litter', 2018);")
+# dbExecute(pg, "INSERT INTO urbancndep.cover_types(cover_category, cover_type, year_added) VALUES ('plot characteristic', 'green', 2017);")
 
 # FIXES
 
@@ -178,19 +214,20 @@ dbExecute(pg, "INSERT INTO urbancndep.cover_types(cover_category, cover_type, ye
 # (or newly added) entities in pg::cover_types
 
 colnames(annuals_cover) <- gsub("latr", "larrea", colnames(annuals_cover), ignore.case = T)
+colnames(annuals_cover) <- gsub(" sp.", "", colnames(annuals_cover), ignore.case = T)
 
 annuals_cover <- annuals_cover %>%
   rename(
-    Amsinckia = `Unknown Amsinckia`,
-    Cryptantha = `Unknown Cryptantha`,
-    Eucrypta = `Unknown Eucrypta`,
-    Pectocarya = `Unknown Pectocarya sp.`,
-    Plantago = `Unknown Plantago`,
-    unidentified_1_2018 = `2018 Unknown #1`,
-    unidentified_2_2018 = `2018 Unknown #2`,
-    unidentified_3_2018 = `2018 Unknown#3`,
-    green = `green (observed)`,
-    litter = litter
+    `Amsinckia tessellata` = `Amsinckia tesselata`,
+    `Eucrypta chrysanthemifolia` = `Eucrypta chrysamthemifolia`,
+    `Herniaria hirsuta` = `Herniaria hirusta`,
+    `Lotus strigosus` = `Lotus strigosus (L. tomentellus)`,
+    `Physaria gordonii` = `Physaria (Lesquerella) gordonii`,
+    `Amsinckia` = `Unknown Amsinckia`,
+    `Pectocarya` = `Unknown Pectocarya`,
+    `green` = `green (observed)`,
+    `unidentified 1 2019` = `2019 Unknown #1 (rosette)`,
+    `Bebbia juncea cover` = `Bebbia juncea (shrub) Cover`
   )
 
 
@@ -211,7 +248,7 @@ FROM urbancndep.cover_types;') %>%
 # record when pulled from the database even when no plants or plot
 # characteristics were present. This is really, really, important.
 
-annuals_cover <- annuals_cover %>%
+temp_annuals_composition <- annuals_cover %>%
   select(`Amsinckia menziesii`:cover_event_id) %>% 
   mutate(sampled = TRUE) %>% # see note above
   gather(cover_type, cover_amt, -cover_event_id) %>% 
@@ -228,8 +265,8 @@ annuals_cover <- annuals_cover %>%
 
 
 # annuals_cover to pg
-if (dbExistsTable(pg, c('urbancndep', 'temp_annuals_composition'))) dbRemoveTable(pg, c('urbancndep', 'temp_annuals_composition'))
-dbWriteTable(pg, c('urbancndep', 'temp_annuals_composition'), value = annuals_cover, row.names = F)
+write_temp_table(databaseName = 'urbancndep',
+                 tempTableName = 'temp_annuals_composition')
 
 insert_composition_query <-
 'INSERT INTO urbancndep.cover_composition
@@ -247,7 +284,8 @@ insert_composition_query <-
   urbancndep.temp_annuals_composition
 );'
 
-dbExecute(pg, insert_composition_query)
+dbExecute(pg,
+          insert_composition_query)
 
 # remove the temp table
 if (dbExistsTable(pg, c('urbancndep', 'temp_annuals_composition'))) dbRemoveTable(pg, c('urbancndep', 'temp_annuals_composition'))
