@@ -4,14 +4,6 @@
 # Script for processing and uploading Des Fert annuals biomass data to the
 # database. Based on an Excel sheet supplied by the technicians.
 
-# the initial build of the annuals_biomass table did not have a foreign key to
-# plot id. Added here but this is a one-time op.
-# dbSendStatement(pg, '
-#             ALTER TABLE urbancndep.annuals_biomass
-#             ADD CONSTRAINT annuals_biomass_fk_plot_id
-#                 FOREIGN KEY (plot_id)
-#                 REFERENCES urbancndep.plots(id);')
-
 
 # libraries ---------------------------------------------------------------
 
@@ -33,25 +25,25 @@ pg <- pg_local
 # process data ------------------------------------------------------------
 
 # get the data and format as appropriate and to match database table structure ----
-biomass2018 <- read_excel('~/Desktop/CNDep_SpringAnnualBiomassSampling_2018_wdata.xlsx')
+biomass2019 <- read_excel('~/Desktop/DesFert_Biomass_SPR2019.xlsx')
+# biomass2018 <- read_excel('~/Desktop/CNDep_SpringAnnualBiomassSampling_2018_wdata.xlsx')
 
-biomass_temp <- biomass2018 %>%
-  rename(mass = `Aboveground Dry Mass (g) - envelope (g)`) %>%  # that field name is painful
-  # mutate(mass = replace(mass, grepl("no sample", NOTES), NA)) %>% # uncollected samples
-  # mutate(mass = round(mass, digits = 3)) %>% # whoa, lots of sig figs
+biomass_temp <- biomass2019 %>%
+  rename(mass = `Aboveground Dry Mass (g) - brown bag (g)`) %>%  # that field name is painful
   mutate(
     date = as.Date(`Collection Date`),
     year = as.numeric(format(date, format = "%Y")),
-    NOTES = paste0(ifelse(is.na(NOTES), "", paste0(NOTES, "; ")), "average bag wt (n=10) = 1.437")
+    notes = "Some of the brown bags differed in type due to location where the bags were purchased. The two types of bag used were lunch bags and giant lunch bags. The lunch bags were smaller and the giant lunch bags were larger. Average weight of small bag (n = 10) = 7.297; average weight of large bag (n = 10) = 10.241."
   ) %>%
-  select(plot_id = `Trmt Plots`,
-         location_within_plot = `Sub-plots`,
-         replicate = replicates,
-         subquad_orientation = `Subquadrat Orientation (N, S, E, W)`,
-         date,
-         year,
-         mass,
-         notes = NOTES)
+  select(
+    plot_id = `Trmt Plots`,
+    location_within_plot = `Sub-plots`,
+    replicate = replicates,
+    subquad_orientation = `Subquadrat Orientation (N, S, E, W)`,
+    date,
+    year,
+    mass,
+    notes)
 
 
 # data to postgres --------------------------------------------------------
